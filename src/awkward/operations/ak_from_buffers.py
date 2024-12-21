@@ -13,6 +13,7 @@ from awkward._nplikes.numpy import Numpy
 from awkward._nplikes.numpy_like import NumpyLike, NumpyMetadata
 from awkward._nplikes.placeholder import PlaceholderArray
 from awkward._nplikes.shape import ShapeItem, unknown_length
+from awkward._nplikes.virtual import VirtualLeafArrayProxy
 from awkward._regularize import is_integer
 from awkward.forms.form import index_to_dtype, regularize_buffer_key
 
@@ -184,6 +185,8 @@ def _from_buffer(
             )
 
         return array[:count]
+    elif isinstance(buffer, VirtualLeafArrayProxy):
+        return buffer
     else:
         array = nplike.frombuffer(buffer, dtype=dtype, count=count)
         return ak._util.native_to_byteorder(array, byteorder)

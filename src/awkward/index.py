@@ -14,6 +14,7 @@ from awkward._nplikes.numpy_like import NumpyLike, NumpyMetadata
 from awkward._nplikes.placeholder import PlaceholderArray
 from awkward._nplikes.shape import ShapeItem
 from awkward._nplikes.typetracer import TypeTracer, TypeTracerArray
+from awkward._nplikes.virtual import VirtualLeafArrayProxy
 from awkward._slicing import normalize_slice
 from awkward._typing import Any, DType, Final, Self, cast
 
@@ -58,14 +59,32 @@ class Index:
         else:
             self._nplike = nplike
 
+        # If this is an actual array, we wrap it in a VirtualLeafArrayProxy
+        # this preserves the same API for the rest of the code
+        if not isinstance(data, VirtualLeafArrayProxy):
+            data = self._nplike.ascontiguousarray(
+                self._nplike.asarray(data, dtype=self._expected_dtype)
+            )
+            self._data = VirtualLeafArrayProxy(
+                nplike=self._nplike,
+                shape=data.shape,
+                dtype=data.dtype,
+                generator=lambda: data,
+                form_key=getattr(data, "form_key", None)
+            )
+            # If this is a TypeTracerArray or PlaceholderArray, we materialize it right away
+            if isinstance(data, (TypeTracerArray, PlaceholderArray)):
+                self._data.materialize()
+        # this is the data that could come from `ak.from_buffers`, where we
+        # already have a `VirtualLeafArrayProxy` constructed. Typically its
+        # `generator` would be a data-reading function (e.g. uproot.TBranch.array(...))
+        else:
+            assert isinstance(data, VirtualLeafArrayProxy)
+            self._data = data
+
         if metadata is not None and not isinstance(metadata, dict):
             raise TypeError("Index metadata must be None or a dict")
         self._metadata = metadata
-        # We don't care about F, C (it's one dimensional), but we do need
-        # the array to be contiguous. This should _not_ return a copy if already
-        self._data = self._nplike.ascontiguousarray(
-            self._nplike.asarray(data, dtype=self._expected_dtype)
-        )
 
         if len(self._data.shape) != 1:
             raise TypeError("Index data must be one-dimensional")
@@ -75,7 +94,7 @@ class Index:
                 np.dtype(np.longlong).itemsize == 8
             ), "longlong is always 64-bit, right?"
 
-            self._data = self._data.view(np.int64)
+            self._data = self.data.view(np.int64)
 
         if self._expected_dtype is None:
             if self._data.dtype == np.dtype(np.int8):
@@ -118,7 +137,9 @@ class Index:
 
     @property
     def data(self) -> ArrayLike:
-        return self._data
+        """accessing this property will materialize the array"""
+        # self._touch_data()
+        return self._data.materialize()
 
     @property
     def nplike(self) -> NumpyLike:
@@ -137,9 +158,9 @@ class Index:
     @property
     def ptr(self):
         if isinstance(self._nplike, Numpy):
-            return self._data.ctypes.data
+            return self.data.ctypes.data
         elif isinstance(self._nplike, Cupy):
-            return self._data.data.ptr
+            return self.data.data.ptr
         elif isinstance(self._nplike, TypeTracer):
             return 0
         else:
@@ -154,7 +175,7 @@ class Index:
     def forget_length(self) -> Self:
         tt = TypeTracer.instance()
         if isinstance(self._nplike, type(tt)):
-            data = self._data
+            data = self.data
         else:
             data = self.raw(tt)
 
@@ -169,20 +190,20 @@ class Index:
 
     @property
     def __cuda_array_interface__(self):
-        return self._data.__cuda_array_interface__  # type: ignore[attr-defined]
+        return self.data.__cuda_array_interface__  # type: ignore[attr-defined]
 
     @property
     def __array_interface__(self):
-        return self._data.__array_interface__  # type: ignore[attr-defined]
+        return self.data.__array_interface__  # type: ignore[attr-defined]
 
     def __dlpack_device__(self) -> tuple[int, int]:
-        return self._data.__dlpack_device__()  # type: ignore[attr-defined]
+        return self.data.__dlpack_device__()  # type: ignore[attr-defined]
 
     def __dlpack__(self, stream: Any = None) -> Any:
         if stream is None:
-            return self._data.__dlpack__()  # type: ignore[attr-defined]
+            return self.data.__dlpack__()  # type: ignore[attr-defined]
         else:
-            return self._data.__dlpack__(stream=stream)  # type: ignore[attr-defined]
+            return self.data.__dlpack__(stream=stream)  # type: ignore[attr-defined]
 
     def __repr__(self) -> str:
         return self._repr("", "", "")
@@ -195,14 +216,16 @@ class Index:
 
         if isinstance(self._data, (TypeTracerArray, PlaceholderArray)):
             arraystr_lines = ["[## ... ##]"]
+        elif isinstance(self._data, VirtualLeafArrayProxy) and not self._data.is_materialized:
+            arraystr_lines = ["[## ... ##]"]
         else:
             arraystr_lines = self._nplike.array_str(
-                self._data, max_line_width=30
+                self.data, max_line_width=30
             ).split("\n")
 
         if len(arraystr_lines) > 1 or self._metadata is not None:
             arraystr_lines = self._nplike.array_str(
-                self._data, max_line_width=max(80 - len(indent) - 4, 40)
+                self.data, max_line_width=max(80 - len(indent) - 4, 40)
             ).split("\n")
             if len(arraystr_lines) > 5:
                 arraystr_lines = arraystr_lines[:2] + [" ..."] + arraystr_lines[-2:]
@@ -232,7 +255,7 @@ class Index:
         if isinstance(where, slice):
             where = normalize_slice(where, nplike=self.nplike)
 
-        out = self._data[where]
+        out = self.data[where]
 
         if hasattr(out, "shape") and len(out.shape) != 0:
             return Index(out, metadata=self.metadata, nplike=self._nplike)
@@ -242,23 +265,23 @@ class Index:
             return out
 
     def __setitem__(self, where, what):
-        self._data[where] = what
+        self.data[where] = what
 
     def to64(self) -> Index:
-        return Index(self._nplike.astype(self._data, dtype=np.int64))
+        return Index(self._nplike.astype(self.data, dtype=np.int64))
 
     def __copy__(self) -> Self:
         return type(self)(self._data, metadata=self._metadata, nplike=self._nplike)
 
     def __deepcopy__(self, memo: dict) -> Self:
         return type(self)(
-            copy.deepcopy(self._data, memo),
+            copy.deepcopy(self.data, memo),
             metadata=copy.deepcopy(self._metadata, memo),
             nplike=self._nplike,
         )
 
     def _nbytes_part(self) -> ShapeItem:
-        return self.data.nbytes
+        return self._data.nbytes
 
     def to_nplike(self, nplike: NumpyLike) -> Self:
         return type(self)(self.raw(nplike), metadata=self.metadata, nplike=nplike)
@@ -276,12 +299,20 @@ class Index:
             return self._nplike.array_equal(self.data, other.data)
 
     def _touch_data(self):
-        if hasattr(self._data, "touch_data"):
-            self._data.touch_data()
+        # break recursion:
+        # can't access `self.data` directly, because it would trigger recursion
+        # instead we access the `_array` attribute of the `VirtualLeafArrayProxy`
+        # which is the materialized array
+        if self._data.is_materialized and hasattr(self._data._array, "touch_data"):
+            self._data._array.touch_data()
 
     def _touch_shape(self):
-        if hasattr(self._data, "touch_shape"):
-            self._data.touch_shape()
+        # break recursion:
+        # can't access `self.data` directly, because it would trigger recursion
+        # instead we access the `_array` attribute of the `VirtualLeafArrayProxy`
+        # which is the materialized array
+        if self._data.is_materialized and hasattr(self._data._array, "touch_shape"):
+            self._data._array.touch_shape()
 
 
 class Index8(Index):

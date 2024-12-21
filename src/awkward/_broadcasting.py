@@ -424,7 +424,7 @@ def apply_step(
 ):
     # This happens when descending anyway, but setting the option does it before action.
     if options["numpy_to_regular"] and any(
-        isinstance(x, NumpyArray) and x.data.ndim != 1 for x in inputs
+        isinstance(x, NumpyArray) and x._data.ndim != 1 for x in inputs
     ):
         inputs = [
             x.to_RegularArray() if isinstance(x, NumpyArray) else x for x in inputs
