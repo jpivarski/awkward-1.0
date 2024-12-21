@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import typing as tp
 import math
+import typing as tp
+
 from awkward._nplikes.numpy_like import NumpyLike
-from awkward._typing import DType
 from awkward._nplikes.shape import ShapeItem
+from awkward._typing import DType
 
 
 class VirtualLeafArrayProxy:

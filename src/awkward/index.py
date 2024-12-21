@@ -70,7 +70,7 @@ class Index:
                 shape=data.shape,
                 dtype=data.dtype,
                 generator=lambda: data,
-                form_key=getattr(data, "form_key", None)
+                form_key=getattr(data, "form_key", None),
             )
             # If this is a TypeTracerArray or PlaceholderArray, we materialize it right away
             if isinstance(data, (TypeTracerArray, PlaceholderArray)):
@@ -216,12 +216,15 @@ class Index:
 
         if isinstance(self._data, (TypeTracerArray, PlaceholderArray)):
             arraystr_lines = ["[## ... ##]"]
-        elif isinstance(self._data, VirtualLeafArrayProxy) and not self._data.is_materialized:
+        elif (
+            isinstance(self._data, VirtualLeafArrayProxy)
+            and not self._data.is_materialized
+        ):
             arraystr_lines = ["[## ... ##]"]
         else:
-            arraystr_lines = self._nplike.array_str(
-                self.data, max_line_width=30
-            ).split("\n")
+            arraystr_lines = self._nplike.array_str(self.data, max_line_width=30).split(
+                "\n"
+            )
 
         if len(arraystr_lines) > 1 or self._metadata is not None:
             arraystr_lines = self._nplike.array_str(

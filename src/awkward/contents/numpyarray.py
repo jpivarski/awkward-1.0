@@ -114,7 +114,9 @@ class NumpyArray(NumpyMeta, Content):
                     return result
     """
 
-    def __init__(self, data: ArrayLike | VirtualLeafArrayProxy, *, parameters=None, backend=None):
+    def __init__(
+        self, data: ArrayLike | VirtualLeafArrayProxy, *, parameters=None, backend=None
+    ):
         if backend is None:
             backend = backend_of_obj(data, default=NumpyBackend.instance())
 
@@ -127,7 +129,7 @@ class NumpyArray(NumpyMeta, Content):
                 shape=data.shape,
                 dtype=data.dtype,
                 generator=lambda: data,
-                form_key=getattr(data, "form_key", None)
+                form_key=getattr(data, "form_key", None),
             )
             # If this is a TypeTracerArray or PlaceholderArray, we materialize it right away
             if isinstance(data, (TypeTracerArray, PlaceholderArray)):
@@ -298,7 +300,9 @@ class NumpyArray(NumpyMeta, Content):
 
         extra = self._repr_extra(indent + "    ")
 
-        if isinstance(self._data, (TypeTracerArray, PlaceholderArray, VirtualLeafArrayProxy)):
+        if isinstance(
+            self._data, (TypeTracerArray, PlaceholderArray, VirtualLeafArrayProxy)
+        ):
             arraystr_lines = ["[## ... ##]"]
         else:
             arraystr_lines = self._backend.nplike.array_str(
@@ -632,9 +636,7 @@ class NumpyArray(NumpyMeta, Content):
                     stops.dtype.type,
                     np.bool_,
                 ](
-                    self._backend.nplike.astype(
-                        self.data, dtype=self.dtype, copy=True
-                    ),
+                    self._backend.nplike.astype(self.data, dtype=self.dtype, copy=True),
                     starts.data,
                     stops.data,
                     starts.length,
@@ -650,9 +652,7 @@ class NumpyArray(NumpyMeta, Content):
                     stops.dtype.type,
                     np.bool_,
                 ](
-                    self._backend.nplike.astype(
-                        self.data, dtype=self.dtype, copy=True
-                    ),
+                    self._backend.nplike.astype(self.data, dtype=self.dtype, copy=True),
                     starts.data,
                     stops.data,
                     starts.length,
@@ -1319,9 +1319,7 @@ class NumpyArray(NumpyMeta, Content):
                 if options["keep_parameters"]:
                     return self
                 else:
-                    return NumpyArray(
-                        self.data, parameters=None, backend=self._backend
-                    )
+                    return NumpyArray(self.data, parameters=None, backend=self._backend)
 
         else:
 
