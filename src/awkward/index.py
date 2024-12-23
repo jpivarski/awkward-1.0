@@ -14,7 +14,7 @@ from awkward._nplikes.numpy_like import NumpyLike, NumpyMetadata
 from awkward._nplikes.placeholder import PlaceholderArray
 from awkward._nplikes.shape import ShapeItem
 from awkward._nplikes.typetracer import TypeTracer, TypeTracerArray
-from awkward._nplikes.virtual import VirtualLeafArrayProxy
+from awkward._nplikes.virtual import VirtualArray
 from awkward._slicing import normalize_slice
 from awkward._typing import Any, DType, Final, Self, cast
 
@@ -59,13 +59,13 @@ class Index:
         else:
             self._nplike = nplike
 
-        # If this is an actual array, we wrap it in a VirtualLeafArrayProxy
+        # If this is an actual array, we wrap it in a VirtualArray
         # this preserves the same API for the rest of the code
-        if not isinstance(data, VirtualLeafArrayProxy):
+        if not isinstance(data, VirtualArray):
             data = self._nplike.ascontiguousarray(
                 self._nplike.asarray(data, dtype=self._expected_dtype)
             )
-            self._data = VirtualLeafArrayProxy(
+            self._data = VirtualArray(
                 nplike=self._nplike,
                 shape=data.shape,
                 dtype=data.dtype,
@@ -76,10 +76,10 @@ class Index:
             if isinstance(data, (TypeTracerArray, PlaceholderArray)):
                 self._data.materialize()
         # this is the data that could come from `ak.from_buffers`, where we
-        # already have a `VirtualLeafArrayProxy` constructed. Typically its
+        # already have a `VirtualArray` constructed. Typically its
         # `generator` would be a data-reading function (e.g. uproot.TBranch.array(...))
         else:
-            assert isinstance(data, VirtualLeafArrayProxy)
+            assert isinstance(data, VirtualArray)
             self._data = data
 
         if metadata is not None and not isinstance(metadata, dict):
@@ -137,9 +137,7 @@ class Index:
 
     @property
     def data(self) -> ArrayLike:
-        """accessing this property will materialize the array"""
-        # self._touch_data()
-        return self._data.materialize()
+        return self._data
 
     @property
     def nplike(self) -> NumpyLike:
@@ -147,7 +145,7 @@ class Index:
 
     @property
     def dtype(self) -> DType:
-        return self._data.dtype
+        return self.data.dtype
 
     @property
     def metadata(self) -> dict:
@@ -170,7 +168,7 @@ class Index:
 
     @property
     def length(self) -> ShapeItem:
-        return self._data.shape[0]
+        return self.data.shape[0]
 
     def forget_length(self) -> Self:
         tt = TypeTracer.instance()
@@ -212,13 +210,13 @@ class Index:
         out = [indent, pre, "<Index dtype="]
         out.append(repr(str(self.dtype)))
         out.append(" len=")
-        out.append(repr(str(self._data.shape[0])))
+        out.append(repr(str(self.data.shape[0])))
 
-        if isinstance(self._data, (TypeTracerArray, PlaceholderArray)):
-            arraystr_lines = ["[## ... ##]"]
-        elif (
-            isinstance(self._data, VirtualLeafArrayProxy)
-            and not self._data.is_materialized
+        # We can't print data of arrays that don't have any like TypeTracerArray or PlaceholderArray.
+        # For VirtualArray, we can print the data if it is materialized, otherwise use the same repr
+        # as for TypeTracerArray and PlaceholderArray. Is there a better way to do this for VirtualArrays?
+        if isinstance(self.data, (TypeTracerArray, PlaceholderArray)) or (
+            isinstance(self.data, VirtualArray) and not self.data.is_materialized
         ):
             arraystr_lines = ["[## ... ##]"]
         else:
@@ -252,7 +250,7 @@ class Index:
 
     @property
     def form(self) -> str:
-        return _dtype_to_form[self._data.dtype]
+        return _dtype_to_form[self.data.dtype]
 
     def __getitem__(self, where):
         if isinstance(where, slice):
@@ -284,7 +282,7 @@ class Index:
         )
 
     def _nbytes_part(self) -> ShapeItem:
-        return self._data.nbytes
+        return self.data.nbytes
 
     def to_nplike(self, nplike: NumpyLike) -> Self:
         return type(self)(self.raw(nplike), metadata=self.metadata, nplike=nplike)
@@ -296,26 +294,18 @@ class Index:
             return (
                 not self._nplike.known_data
                 or self._nplike.array_equal(self.data, other.data)
-            ) and self._data.dtype == other.data.dtype
+            ) and self.data.dtype == other.data.dtype
 
         else:
             return self._nplike.array_equal(self.data, other.data)
 
     def _touch_data(self):
-        # break recursion:
-        # can't access `self.data` directly, because it would trigger recursion
-        # instead we access the `_array` attribute of the `VirtualLeafArrayProxy`
-        # which is the materialized array
-        if self._data.is_materialized and hasattr(self._data._array, "touch_data"):
-            self._data._array.touch_data()
+        if hasattr(self.data._array, "touch_data"):
+            self.data._array.touch_data()
 
     def _touch_shape(self):
-        # break recursion:
-        # can't access `self.data` directly, because it would trigger recursion
-        # instead we access the `_array` attribute of the `VirtualLeafArrayProxy`
-        # which is the materialized array
-        if self._data.is_materialized and hasattr(self._data._array, "touch_shape"):
-            self._data._array.touch_shape()
+        if hasattr(self.data._array, "touch_shape"):
+            self.data._array.touch_shape()
 
 
 class Index8(Index):

@@ -21,7 +21,7 @@ from awkward._nplikes.numpy_like import IndexType, NumpyMetadata
 from awkward._nplikes.placeholder import PlaceholderArray
 from awkward._nplikes.shape import ShapeItem, unknown_length
 from awkward._nplikes.typetracer import TypeTracerArray
-from awkward._nplikes.virtual import VirtualLeafArrayProxy
+from awkward._nplikes.virtual import VirtualArray
 from awkward._parameters import (
     parameters_intersect,
     type_parameters_equal,
@@ -115,16 +115,18 @@ class NumpyArray(NumpyMeta, Content):
     """
 
     def __init__(
-        self, data: ArrayLike | VirtualLeafArrayProxy, *, parameters=None, backend=None
+        self, data: ArrayLike | VirtualArray, *, parameters=None, backend=None
     ):
         if backend is None:
             backend = backend_of_obj(data, default=NumpyBackend.instance())
 
-        # If this is an actual array, we wrap it in a VirtualLeafArrayProxy
-        # this preserves the same API for the rest of the code
-        if not isinstance(data, VirtualLeafArrayProxy):
+        # If this is an actual array, we wrap it in a VirtualArray
+        # this preserves the same API for the rest of the code and
+        # let's us run the full test suite to see what we're missing
+        # to make virtual arrays work
+        if not isinstance(data, VirtualArray):
             data = backend.nplike.asarray(data)
-            self._data = VirtualLeafArrayProxy(
+            self._data = VirtualArray(
                 nplike=backend.nplike,
                 shape=data.shape,
                 dtype=data.dtype,
@@ -135,10 +137,10 @@ class NumpyArray(NumpyMeta, Content):
             if isinstance(data, (TypeTracerArray, PlaceholderArray)):
                 self._data.materialize()
         # this is the data that could come from `ak.from_buffers`, where we
-        # already have a `VirtualLeafArrayProxy` constructed. Typically its
+        # already have a `VirtualArray` constructed. Typically its
         # `generator` would be a data-reading function (e.g. uproot.TBranch.array(...))
         else:
-            assert isinstance(data, VirtualLeafArrayProxy)
+            assert isinstance(data, VirtualArray)
             self._data = data
 
         if not isinstance(backend.nplike, Jax):
@@ -161,9 +163,7 @@ class NumpyArray(NumpyMeta, Content):
 
     @property
     def data(self) -> ArrayLike:
-        """accessing this property will materialize the array"""
-        # self._touch_data(False)
-        return self._data.materialize()
+        return self._data
 
     form_cls: Final = NumpyForm
 
@@ -176,7 +176,7 @@ class NumpyArray(NumpyMeta, Content):
     ):
         return NumpyArray(
             # This is a shallow copy, so the data is not copied.
-            self._data if data is UNSET else data,
+            self.data if data is UNSET else data,
             # self.data.copy() if data is UNSET else data,
             parameters=self._parameters if parameters is UNSET else parameters,
             backend=self._backend if backend is UNSET else backend,
@@ -198,30 +198,30 @@ class NumpyArray(NumpyMeta, Content):
 
     @property
     def shape(self) -> tuple[ShapeItem, ...]:
-        return self._data.shape
+        return self.data.shape
 
     @property
     def inner_shape(self) -> tuple[ShapeItem, ...]:
-        if hasattr(self._data._array, "inner_shape"):
-            inner_shape = self._data._array.inner_shape
+        if hasattr(self.data._array, "inner_shape"):
+            inner_shape = self.data._array.inner_shape
         else:
-            inner_shape = self._data.shape[1:]
+            inner_shape = self.data.shape[1:]
         return inner_shape
 
     @property
     def strides(self) -> tuple[ShapeItem, ...]:
-        return self._backend.nplike.strides(self._data)
+        return self._backend.nplike.strides(self.data)
 
     @property
     def dtype(self) -> np.dtype:
-        return self._data.dtype
+        return self.data.dtype
 
     def _raw(self, nplike=None):
         return to_nplike(self.data, nplike, from_nplike=self._backend.nplike)
 
     def _form_with_key(self, getkey: Callable[[Content], str | None]) -> NumpyForm:
         return self.form_cls(
-            ak.types.numpytype.dtype_to_primitive(self._data.dtype),
+            ak.types.numpytype.dtype_to_primitive(self.data.dtype),
             self.inner_shape,
             parameters=self._parameters,
             form_key=getkey(self),
@@ -229,7 +229,7 @@ class NumpyArray(NumpyMeta, Content):
 
     def _form_with_key_path(self, path: FormKeyPathT) -> NumpyForm:
         return self.form_cls(
-            ak.types.numpytype.dtype_to_primitive(self._data.dtype),
+            ak.types.numpytype.dtype_to_primitive(self.data.dtype),
             self.inner_shape,
             parameters=self._parameters,
             form_key=repr(path),
@@ -254,9 +254,9 @@ class NumpyArray(NumpyMeta, Content):
         # data = self._raw(backend.nplike)
         # Built typetracer without materializing
         data = TypeTracerArray._new(
-            dtype=self._data.dtype,
-            shape=self._data.shape,
-            form_key=self._data.form_key,
+            dtype=self.data.dtype,
+            shape=self.data.shape,
+            form_key=self.data.form_key,
             report=None,
         )
         return NumpyArray(
@@ -266,24 +266,16 @@ class NumpyArray(NumpyMeta, Content):
         )
 
     def _touch_data(self, recursive: bool):
-        # break recursion:
-        # can't access `self.data` directly, because it would trigger recursion
-        # instead we access the `_array` attribute of the `VirtualLeafArrayProxy`
-        # which is the materialized array
-        if self._data.is_materialized and hasattr(self._data._array, "touch_data"):
-            self._data._array.touch_data()
+        if hasattr(self.data._array, "touch_data"):
+            self.data._array.touch_data()
 
     def _touch_shape(self, recursive: bool):
-        # break recursion:
-        # can't access `self.data` directly, because it would trigger recursion
-        # instead we access the `_array` attribute of the `VirtualLeafArrayProxy`
-        # which is the materialized array
-        if self._data.is_materialized and hasattr(self._data._array, "touch_shape"):
-            self._data._array.touch_shape()
+        if hasattr(self.data._array, "touch_shape"):
+            self.data._array.touch_shape()
 
     @property
     def length(self) -> ShapeItem:
-        return self._data.shape[0]
+        return self.data.shape[0]
 
     def __repr__(self):
         return self._repr("", "", "")
@@ -291,18 +283,16 @@ class NumpyArray(NumpyMeta, Content):
     def _repr(self, indent, pre, post):
         out = [indent, pre, "<NumpyArray dtype="]
         out.append(repr(str(self.dtype)))
-        if len(self._data.shape) == 1:
-            out.append(" len=" + repr(str(self._data.shape[0])))
+        if len(self.data.shape) == 1:
+            out.append(" len=" + repr(str(self.data.shape[0])))
         else:
             out.append(
-                " shape='({})'".format(", ".join(str(x) for x in self._data.shape))
+                " shape='({})'".format(", ".join(str(x) for x in self.data.shape))
             )
 
         extra = self._repr_extra(indent + "    ")
 
-        if isinstance(
-            self._data, (TypeTracerArray, PlaceholderArray, VirtualLeafArrayProxy)
-        ):
+        if isinstance(self.data, (TypeTracerArray, PlaceholderArray, VirtualArray)):
             arraystr_lines = ["[## ... ##]"]
         else:
             arraystr_lines = self._backend.nplike.array_str(
@@ -329,7 +319,7 @@ class NumpyArray(NumpyMeta, Content):
         return "".join(out)
 
     def to_RegularArray(self):
-        shape = self._data.shape
+        shape = self.data.shape
         zeroslen = [1]
         for x in shape:
             zeroslen.append(zeroslen[-1] * x)
@@ -359,12 +349,12 @@ class NumpyArray(NumpyMeta, Content):
         )
 
     def _is_getitem_at_placeholder(self) -> bool:
-        return isinstance(self._data, PlaceholderArray)
+        return isinstance(self.data, PlaceholderArray)
 
     def _getitem_at(self, where: IndexType):
-        if not self._backend.nplike.known_data and len(self._data.shape) == 1:
+        if not self._backend.nplike.known_data and len(self.data.shape) == 1:
             self._touch_data(recursive=False)
-            return TypeTracerArray._new(self._data.dtype, shape=())
+            return TypeTracerArray._new(self.data.dtype, shape=())
 
         try:
             out = self.data[where]
@@ -407,7 +397,7 @@ class NumpyArray(NumpyMeta, Content):
     def _getitem_next_jagged(
         self, slicestarts: Index, slicestops: Index, slicecontent: Content, tail
     ) -> Content:
-        if self._data.ndim == 1:
+        if self.data.ndim == 1:
             raise ak._errors.index_error(
                 self,
                 ak.contents.ListArray(
@@ -517,7 +507,7 @@ class NumpyArray(NumpyMeta, Content):
             return self._to_regular_primitive()._mergeable_next(other, mergebool)
 
         elif isinstance(other, ak.contents.NumpyArray):
-            if self._data.ndim != other._data.ndim:
+            if self.data.ndim != other.data.ndim:
                 return False
 
             # Obvious fast-path
@@ -677,7 +667,7 @@ class NumpyArray(NumpyMeta, Content):
             self._backend[
                 "awkward_NumpyArray_sort_asstrings_uint8",
                 self.dtype.type,
-                self._data.dtype.type,
+                self.data.dtype.type,
                 offsets._data.dtype.type,
                 outoffsets.dtype.type,
             ](
@@ -766,13 +756,13 @@ class NumpyArray(NumpyMeta, Content):
             contiguous_self = self.to_contiguous()
 
             offsets = ak.index.Index64.zeros(2, self._backend.index_nplike)
-            offsets[1] = self._data.size
+            offsets[1] = self.data.size
             dtype = (
                 np.dtype(np.int64)
-                if self._data.dtype.kind.upper() == "M"
-                else self._data.dtype
+                if self.data.dtype.kind.upper() == "M"
+                else self.data.dtype
             )
-            out = self._backend.nplike.empty(self._data.size, dtype=dtype)
+            out = self._backend.nplike.empty(self.data.size, dtype=dtype)
             assert offsets.nplike is self._backend.index_nplike
             self._backend.maybe_kernel_error(
                 self._backend[
@@ -855,7 +845,7 @@ class NumpyArray(NumpyMeta, Content):
                 self._backend[
                     "awkward_sort",
                     out.dtype.type,
-                    self._data.dtype.type,
+                    self.data.dtype.type,
                     offsets.dtype.type,
                 ](
                     out,
@@ -986,8 +976,8 @@ class NumpyArray(NumpyMeta, Content):
 
             dtype = (
                 np.dtype(np.int64)
-                if self._data.dtype.kind.upper() == "M"
-                else self._data.dtype
+                if self.data.dtype.kind.upper() == "M"
+                else self.data.dtype
             )
             nextcarry = ak.index.Index64.empty(self.length, self._backend.index_nplike)
             assert (
@@ -1093,8 +1083,8 @@ class NumpyArray(NumpyMeta, Content):
 
             dtype = (
                 np.dtype(np.int64)
-                if self._data.dtype.kind.upper() == "M"
-                else self._data.dtype
+                if self.data.dtype.kind.upper() == "M"
+                else self.data.dtype
             )
             out = self._backend.nplike.empty(self.length, dtype=dtype)
             assert offsets.nplike is self._backend.index_nplike
@@ -1144,7 +1134,7 @@ class NumpyArray(NumpyMeta, Content):
         keepdims,
         behavior,
     ):
-        if self._data.ndim > 1:
+        if self.data.ndim > 1:
             return self.to_RegularArray()._reduce_next(
                 reducer,
                 negaxis,
@@ -1171,7 +1161,7 @@ class NumpyArray(NumpyMeta, Content):
 
         # Yes, we've just tested these, but we need to be explicit that they are invariants
         assert self.is_contiguous
-        assert self._data.ndim == 1
+        assert self.data.ndim == 1
 
         out = reducer.apply(self, parents, starts, shifts, outlength)
 
@@ -1206,7 +1196,7 @@ class NumpyArray(NumpyMeta, Content):
         for i, dim in enumerate(self.shape):
             if dim < 0:
                 return f"at {path} ({type(self)!r}): shape[{i}] < 0"
-        for i, stride in enumerate(self._data.strides):
+        for i, stride in enumerate(self.data.strides):
             if stride % self.dtype.itemsize != 0:
                 return f"at {path} ({type(self)!r}): shape[{i}] % itemsize != 0"
         return ""
@@ -1230,7 +1220,7 @@ class NumpyArray(NumpyMeta, Content):
             return self._pad_none_axis0(target, clip=True)
 
     def _nbytes_part(self):
-        return self._data.nbytes
+        return self.data.nbytes
 
     def _to_arrow(
         self,
@@ -1240,7 +1230,7 @@ class NumpyArray(NumpyMeta, Content):
         length: int,
         options: ToArrowOptions,
     ):
-        if self._data.ndim != 1:
+        if self.data.ndim != 1:
             return self.to_RegularArray()._to_arrow(
                 pyarrow, mask_node, validbytes, length, options
             )
@@ -1274,7 +1264,7 @@ class NumpyArray(NumpyMeta, Content):
         from cudf.core.column.column import as_column
 
         assert self._backend.nplike.known_data
-        data = as_column(self._data)
+        data = as_column(self.data)
         if mask is not None:
             m = cupy.packbits(cupy.asarray(mask), bitorder="little")
             if m.nbytes % 64:
@@ -1290,7 +1280,7 @@ class NumpyArray(NumpyMeta, Content):
         self, backend: Backend, options: RemoveStructureOptions
     ) -> list[Content]:
         if options["keepdims"]:
-            shape = (1,) * (self._data.ndim - 1) + (-1,)
+            shape = (1,) * (self.data.ndim - 1) + (-1,)
         else:
             shape = (-1,)
         return [
@@ -1308,7 +1298,7 @@ class NumpyArray(NumpyMeta, Content):
         lateral_context: Mapping[str, Any] | None,
         options: ApplyActionOptions,
     ) -> Content | None:
-        if self._data.ndim != 1 and options["numpy_to_regular"]:
+        if self.data.ndim != 1 and options["numpy_to_regular"]:
             return self.to_RegularArray()._recursively_apply(
                 action, depth, depth_context, lateral_context, options
             )

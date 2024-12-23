@@ -16,7 +16,7 @@ def test_no_copy():
     form = ak.forms.NumpyForm("int64", form_key="buffer")
     layout, report = typetracer_with_report(form)
 
-    typetracer.asarray(layout._data)
+    typetracer.asarray(layout.data)
     assert not report.data_touched
 
 
@@ -24,7 +24,7 @@ def test_no_copy_dtype():
     form = ak.forms.NumpyForm("int64", form_key="buffer")
     layout, report = typetracer_with_report(form)
 
-    typetracer.asarray(layout._data, dtype=np.int64)
+    typetracer.asarray(layout.data, dtype=np.int64)
     assert not report.data_touched
 
 
