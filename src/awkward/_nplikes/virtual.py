@@ -116,11 +116,12 @@ class VirtualArray(ArrayLike):
             nplike=self.nplike,
             shape=self.shape[::-1],
             dtype=self.dtype,
-            generator=self.generator,
+            # we can delay materialization by stacking the transposition with a lambda
+            generator=lambda: self.generator().T,
             form_key=self.form_key,
         )
         if self.is_materialized:
-            transposed._array = self._array
+            transposed._array = self._array.T
         return transposed
 
     @property
