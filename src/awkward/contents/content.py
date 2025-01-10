@@ -690,7 +690,7 @@ class Content(Meta):
                     nplike=self._backend.index_nplike,
                 )
             elif np.issubdtype(where.dtype, np.bool_):
-                if len(where.data.shape) == 1:
+                if len(where._data.shape) == 1:
                     where = self._backend.index_nplike.nonzero(data_as_index)[0]
                     carry = Index64(where, nplike=self._backend.index_nplike)
                     allow_lazy = "copied"  # True, but also can be modified in-place
@@ -835,7 +835,7 @@ class Content(Meta):
             )
         )
         return ak.contents.NumpyArray(
-            localindex.data, parameters=None, backend=self._backend
+            localindex._data, parameters=None, backend=self._backend
         )
 
     def _mergeable_next(self, other: Content, mergebool: bool) -> bool:
@@ -960,8 +960,8 @@ class Content(Meta):
             self._backend[
                 "awkward_RegularArray_combinations_64",
                 np.int64,
-                toindex.data.dtype.type,
-                fromindex.data.dtype.type,
+                toindex._data.dtype.type,
+                fromindex._data.dtype.type,
             ](
                 tocarryraw,
                 toindex.data,

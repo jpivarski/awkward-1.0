@@ -535,7 +535,7 @@ class ListArray(ListMeta[Content], Content):
             )
             carrylen = self._backend.index_nplike.index_as_shape_item(_carrylen[0])
 
-            sliceindex = ak.index.Index64(slicecontent._data)
+            sliceindex = ak.index.Index64(slicecontent.data)
             outoffsets = ak.index.Index64.empty(
                 slicestarts.length + 1,
                 self._backend.index_nplike,
