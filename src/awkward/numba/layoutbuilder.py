@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numba
 import numpy as np
 
 import awkward as ak
@@ -36,12 +37,43 @@ class LayoutBuilder:
         raise AssertionError("missing implementation")
 
 
+# similar to numba.from_dtype
+_numba_to_dtype = {
+    numba.boolean: np.dtype(np.int8),
+    numba.int8: np.dtype(np.int8),
+    numba.int8: np.dtype(np.int8),
+    numba.uint8: np.dtype(np.uint8),
+    numba.int32: np.dtype(np.int32),
+    numba.uint32: np.dtype(np.uint32),
+    numba.int64: np.dtype(np.int64),
+    numba.float32: np.dtype(np.float32),
+    numba.float64: np.dtype(np.float64),
+}
+
+_numba_dtype_to_form = {
+    numba.int8: "i8",
+    numba.uint8: "u8",
+    numba.int32: "i32",
+    numba.uint32: "u32",
+    numba.int64: "i64",
+}
+
+
+def _empty_typed_list_of(dtype=None):
+    if isinstance(dtype, numba.typed.List):
+        return dtype
+
+    empty_list = numba.typed.List()
+    # Small hack to define its type before returning it:
+    empty_list.append(dtype(0))
+    empty_list.pop()
+    return empty_list
+
+
 @final
 class Numpy(LayoutBuilder):
-    def __init__(self, dtype, *, parameters=None, initial=1024, resize=8.0):
-        self._data = ak.numba.GrowableBuffer(
-            dtype=dtype, initial=initial, resize=resize
-        )
+    def __init__(self, dtype, *, parameters=None):
+        self._data = _empty_typed_list_of(dtype=dtype)
         self._init(parameters)
 
     @classmethod
@@ -52,13 +84,13 @@ class Numpy(LayoutBuilder):
         return out
 
     def __repr__(self):
-        return f"ak.numba.lb.Numpy({self._data.dtype}, parameters={self._parameters})"
+        return f"ak.numba.lb.Numpy({self.data._dtype}, parameters={self._parameters})"
 
     def numbatype(self):
         import numba
 
         return ak._connect.numba.layoutbuilder.NumpyType(
-            numba.from_dtype(self.dtype), numba.types.StringLiteral(self._parameters)
+            self._data._dtype, numba.types.StringLiteral(self._parameters)
         )
 
     def __len__(self):
@@ -66,18 +98,25 @@ class Numpy(LayoutBuilder):
 
     @property
     def dtype(self):
-        return self._data.dtype
+        return _numba_to_dtype[self._data._dtype]
+
+    @property
+    def data(self):
+        return self._data
 
     def append(self, x):
-        self._data.append(x)
+        self._data.append(self._data._dtype(x))
 
     def extend(self, data):
-        self._data.extend(data)
+        for x in data:
+            self._data.append(self._data._dtype(x))
 
     @property
     def form(self):
         return ak.forms.NumpyForm(
-            primitive=ak.types.numpytype.dtype_to_primitive(self._data.dtype),
+            primitive=ak.types.numpytype.dtype_to_primitive(
+                _numba_to_dtype[self._data._dtype]
+            ),
             parameters=self._parameters,
         )
 
@@ -89,7 +128,7 @@ class Numpy(LayoutBuilder):
 
     def snapshot(self) -> ak.contents.Content:
         return ak.contents.NumpyArray(
-            self._data.snapshot(), parameters=self._parameters
+            np.asarray(self._data, dtype=self.dtype), parameters=self._parameters
         )
 
 
@@ -127,25 +166,28 @@ class Empty(LayoutBuilder):
 
 @final
 class ListOffset(LayoutBuilder):
-    def __init__(self, dtype, content, *, parameters=None, initial=1024, resize=8.0):
-        self._offsets = ak.numba.GrowableBuffer(
-            dtype=np.dtype(dtype), initial=initial, resize=resize
-        )
+    def __init__(self, dtype, content, *, parameters=None):
+        self._dtype = dtype
+        self._offsets = numba.typed.List()
         self._offsets.append(0)
         self._content = content
         self._init(parameters)
 
     def __repr__(self):
-        return f"ak.numba.lb.ListOffset({self._offsets.dtype}, {self._content}, parameters={self._parameters})"
+        return f"ak.numba.lb.ListOffset({self._offsets._dtype}, {self._content}, parameters={self._parameters})"
 
     def numbatype(self):
         import numba
 
         return ak._connect.numba.layoutbuilder.ListOffsetType(
-            numba.from_dtype(self.offsets.dtype),
-            self.content,
+            self._offsets._dtype,
+            self._content,
             numba.types.StringLiteral(self._parameters),
         )
+
+    @property
+    def dtype(self):
+        return _numba_to_dtype[self._dtype]
 
     @property
     def offsets(self):
@@ -158,8 +200,8 @@ class ListOffset(LayoutBuilder):
     @property
     def form(self):
         return ak.forms.ListOffsetForm(
-            ak.index._dtype_to_form[self.offsets.dtype],
-            self.content.form,
+            _numba_dtype_to_form[self.offsets._dtype],
+            self._content.form,
             parameters=self._parameters,
         )
 
@@ -167,28 +209,29 @@ class ListOffset(LayoutBuilder):
         return self._content
 
     def end_list(self):
-        self._offsets.append(len(self._content))
+        self.offsets.append(self.offsets._dtype(len(self._content)))
 
     def clear(self):
-        self._offsets.clear()
-        self._offsets.append(0)
-        self._content.clear()
+        self.offsets.clear()
+        self.offsets.append(self.offsets._dtype(0))
+        self.content.clear()
 
     def __len__(self):
-        return self._offsets._length_pos[0] - 1
+        return len(self.offsets) - 1
 
     def is_valid(self, error: str):
-        if len(self._content) != self._offsets.last():
-            error = f"ListOffset node{self._id} has content length {len(self._content)} but last offset {self._offsets.last()}"
+        if len(self.content) != self.offsets[-1]:
+            error = f"ListOffset node{self._id} has content length {len(self.content)} but last offset {self.offsets[-1]}"
             return False
         else:
             return self._content.is_valid(error)
 
     def snapshot(self) -> ak.contents.Content:
         content = self._content.snapshot()
-
         return ak.contents.listoffsetarray.ListOffsetArray(
-            ak.index.Index(self._offsets.snapshot()),
+            ak.index.Index(
+                np.asarray(self.offsets, dtype=_numba_to_dtype[self.offsets._dtype])
+            ),
             content,
             parameters=self._parameters,
         )
@@ -260,27 +303,44 @@ class Regular(LayoutBuilder):
         )
 
 
+#
+# from pprint import pprint
+#
+# from numba import types, typed
+# from numba.experimental import jitclass
+#
+# @jitclass([('l',types.ListType(types.float64))])
+# class Test:
+#     def __init__(self):
+#         self.l = typed.List.empty_list(types.float64)
+#
+# obj = Test()
+# obj.l.append(5.5)
+
+
 @final
 class IndexedOption(LayoutBuilder):
-    def __init__(self, dtype, content, *, parameters=None, initial=1024, resize=8.0):
+    def __init__(self, dtype, content, *, parameters=None):
+        self._index = numba.typed.List().empty_list(numba.types.int64)
         self._last_valid = -1
-        self._index = ak.numba.GrowableBuffer(
-            dtype=dtype, initial=initial, resize=resize
-        )
         self._content = content
         self._init(parameters)
 
     def __repr__(self):
-        return f"ak.numba.lb.IndexedOption({self._index.dtype}, {self._content}, parameters={self._parameters})"
+        return f"ak.numba.lb.IndexedOption({self.dtype}, {self._content}, parameters={self._parameters})"
 
     def numbatype(self):
         import numba
 
         return ak._connect.numba.layoutbuilder.IndexedOptionType(
-            numba.from_dtype(self.index.dtype),
-            self.content,
+            self._index._dtype,
+            self._content,
             numba.types.StringLiteral(self._parameters),
         )
+
+    @property
+    def dtype(self):
+        return _numba_to_dtype[self._index._dtype]
 
     @property
     def index(self):
@@ -293,28 +353,30 @@ class IndexedOption(LayoutBuilder):
     @property
     def form(self):
         return ak.forms.IndexedOptionForm(
-            ak.index._dtype_to_form[self.index.dtype],
-            self.content.form,
+            _numba_dtype_to_form[self.index._dtype],
+            self._content.form,
             parameters=self._parameters,
         )
 
     def append_valid(self):
         self._last_valid = len(self._content)
-        self._index.append(self._last_valid)
+        self._index.append(self.index._dtype(self._last_valid))
         return self._content
 
     def extend_valid(self, size):
         start = len(self._content)
         stop = start + size
         self._last_valid = stop - 1
-        self._index.extend(list(range(start, stop)))
+        for x in range(start, stop):
+            self._index.append(self.index._dtype(x))
         return self._content
 
     def append_invalid(self):
-        self._index.append(-1)
+        self._index.append(self.index._dtype(-1))
 
     def extend_invalid(self, size):
-        self._index.extend([-1] * size)
+        for _ in range(size):
+            self._index.append(self.index._dtype(-1))
 
     def clear(self):
         self._last_valid = -1
@@ -322,7 +384,7 @@ class IndexedOption(LayoutBuilder):
         self._content.clear()
 
     def __len__(self):
-        return self._index._length
+        return len(self._index)
 
     def is_valid(self, error: str):
         if len(self._content) != self._last_valid + 1:
@@ -333,7 +395,9 @@ class IndexedOption(LayoutBuilder):
 
     def snapshot(self) -> ak.contents.Content:
         return ak.contents.IndexedOptionArray(
-            ak.index.Index64(self._index.snapshot()),
+            ak.index.Index(
+                np.asarray(self._index, dtype=_numba_to_dtype[self._index._dtype])
+            ),
             self._content.snapshot(),
             parameters=self._parameters,
         )
@@ -347,18 +411,14 @@ class ByteMasked(LayoutBuilder):
         *,
         valid_when=True,
         parameters=None,
-        initial=1024,
-        resize=8.0,
     ):
-        self._mask = ak.numba.GrowableBuffer(
-            dtype=np.dtype(np.bool_), initial=initial, resize=resize
-        )
+        self._mask = _empty_typed_list_of(dtype=np.int8)
         self._content = content
         self._valid_when = valid_when
         self._init(parameters)
 
     def __repr__(self):
-        return f"ak.numba.lb.ByteMasked({self._content}, valid_when={self._valid_when}, parameters={self._parameters})"
+        return f"ak.numba.lb.ByteMasked({self._content}, valid_when={self._valid_when}, parameters={self.parameters})"
 
     def numbatype(self):
         import numba
@@ -391,7 +451,8 @@ class ByteMasked(LayoutBuilder):
         return self._content
 
     def extend_valid(self, size):
-        self._mask.extend([self._valid_when] * size)
+        for _ in range(size):
+            self._mask.append(self._valid_when)
         return self._content
 
     def append_invalid(self):
@@ -399,7 +460,8 @@ class ByteMasked(LayoutBuilder):
         return self._content
 
     def extend_invalid(self, size):
-        self._mask.extend([not self._valid_when] * size)
+        for _ in range(size):
+            self._mask.append(not self._valid_when)
         return self._content
 
     def clear(self):
@@ -418,7 +480,9 @@ class ByteMasked(LayoutBuilder):
 
     def snapshot(self) -> ak.contents.Content:
         return ak.contents.ByteMaskedArray(
-            ak.index.Index8(self._mask.snapshot()),
+            ak.index.Index(
+                np.asarray(self._mask, dtype=_numba_to_dtype[self._mask._dtype])
+            ),
             self._content.snapshot(),
             valid_when=self._valid_when,
             parameters=self._parameters,
@@ -435,12 +499,8 @@ class BitMasked(LayoutBuilder):
         lsb_order,
         *,
         parameters=None,
-        initial=1024,
-        resize=8.0,
     ):
-        self._mask = ak.numba.GrowableBuffer(
-            dtype=dtype, initial=initial, resize=resize
-        )
+        self._mask = _empty_typed_list_of(dtype=np.uint8)  # FIXME
         self._content = content
         self._valid_when = valid_when
         self._lsb_order = lsb_order
@@ -475,18 +535,22 @@ class BitMasked(LayoutBuilder):
         self._init(parameters)
 
     def __repr__(self):  # as constructor
-        return f"ak.numba.lb.BitMasked({self._mask.dtype}, {self._content}, {self._valid_when}, {self._lsb_order}, parameters={self._parameters})"
+        return f"ak.numba.lb.BitMasked({self._mask._dtype}, {self._content}, {self._valid_when}, {self._lsb_order}, parameters={self.parameters})"
 
     def numbatype(self):
         import numba
 
         return ak._connect.numba.layoutbuilder.BitMaskedType(
-            numba.from_dtype(self._mask.dtype),
+            self._mask._dtype,
             self.content,
             self.valid_when,
             self.lsb_order,
             numba.types.StringLiteral(self._parameters),
         )
+
+    @property
+    def mask(self):
+        return self._mask
 
     @property
     def content(self):
@@ -503,7 +567,7 @@ class BitMasked(LayoutBuilder):
     @property
     def form(self):
         return ak.forms.BitMaskedForm(
-            ak.index._dtype_to_form[self._mask.dtype],
+            _numba_dtype_to_form[self.mask._dtype],
             self.content.form,
             self.valid_when,
             self.lsb_order,
@@ -514,16 +578,16 @@ class BitMasked(LayoutBuilder):
         """
         Private helper function.
         """
-        if self._current_byte_index[1] == 8:
+        if self._current_byte_index[1] == np.uint8(8):
             self._current_byte_index[0] = np.uint8(0)
             self._mask.append(self._current_byte_index[0])
-            self._current_byte_index[1] = 0
+            self._current_byte_index[1] = np.uint8(0)
 
     def _append_end(self):
         """
         Private helper function.
         """
-        self._current_byte_index[1] += 1
+        self._current_byte_index[1] += np.uint8(1)
         if self._valid_when:
             # 0 indicates null, 1 indicates valid
             self._mask._panels[-1][self._mask._length_pos[1] - 1] = (
@@ -531,9 +595,7 @@ class BitMasked(LayoutBuilder):
             )
         else:
             # 0 indicates valid, 1 indicates null
-            self._mask._panels[-1][
-                self._mask._length_pos[1] - 1
-            ] = ~self._current_byte_index[0]
+            self._mask._panels[-1] = ~self._current_byte_index[0]
 
     def append_valid(self):
         self._append_begin()
@@ -580,7 +642,9 @@ class BitMasked(LayoutBuilder):
 
     def snapshot(self) -> ak.contents.Content:
         return ak.contents.BitMaskedArray(
-            ak.index.Index(self._mask.snapshot()),
+            ak.index.Index(
+                np.asarray(self._mask, dtype=_numba_to_dtype[self._mask._dtype])
+            ),
             self._content.snapshot(),
             valid_when=self._valid_when,
             length=len(self),
@@ -787,15 +851,9 @@ class Union(LayoutBuilder):
         contents,
         *,
         parameters=None,
-        initial=1024,
-        resize=8.0,
     ):
-        self._tags = ak.numba.GrowableBuffer(
-            dtype=tags_dtype, initial=initial, resize=resize
-        )
-        self._index = ak.numba.GrowableBuffer(
-            dtype=index_dtype, initial=initial, resize=resize
-        )
+        self._tags = _empty_typed_list_of(dtype=tags_dtype)
+        self._index = _empty_typed_list_of(dtype=index_dtype)
         self._contents = tuple(contents)
         self._init(parameters)
 
@@ -819,21 +877,21 @@ class Union(LayoutBuilder):
     @property
     def form(self):
         return ak.forms.UnionForm(
-            ak.index._dtype_to_form[self.tags.dtype],
-            ak.index._dtype_to_form[self.index.dtype],
+            _numba_dtype_to_form[self.tags._dtype],
+            _numba_dtype_to_form[self.index._dtype],
             [content.form for content in self.contents],
             parameters=self._parameters,
         )
 
     def __repr__(self):
-        return f"ak.numba.lb.Union({self._tags.dtype}, {self._index.dtype}, {self.contents}, parameters={self._parameters})"
+        return f"ak.numba.lb.Union({self.tags._dtype}, {self.index._dtype}, {self.contents}, parameters={self.parameters})"
 
     def numbatype(self):
         import numba
 
         return ak._connect.numba.layoutbuilder.UnionType(
-            numba.from_dtype(self._tags.dtype),
-            numba.from_dtype(self._index.dtype),
+            self._tags._dtype,
+            self._index._dtype,
             self.contents,
             numba.types.StringLiteral(self._parameters),
         )
@@ -841,18 +899,18 @@ class Union(LayoutBuilder):
     def append_content(self, tag):
         which_content = self._contents[tag]
         next_index = len(which_content)
-        self._tags.append(tag)
-        self._index.append(next_index)
+        self.tags.append(self.tags._dtype(tag))
+        self.index.append(self.index._dtype(next_index))
         return which_content
 
     def clear(self):
-        self._tags.clear()
-        self._index.clear()
+        self.tags.clear()
+        self.index.clear()
         for content in self._contents:
             content.clear()
 
     def __len__(self):
-        return len(self._tags)
+        return len(self.tags)
 
     def is_valid(self, error: str):
         for content in self._contents:
@@ -866,8 +924,12 @@ class Union(LayoutBuilder):
             contents.append(content.snapshot())
 
         return ak.contents.UnionArray(
-            ak.index.Index8(self._tags.snapshot()),
-            ak.index.Index64(self._index.snapshot()),
+            ak.index.Index(
+                np.asarray(self.tags, dtype=_numba_to_dtype[self._tags._dtype])
+            ),
+            ak.index.Index(
+                np.asarray(self.index, dtype=_numba_to_dtype[self._index._dtype])
+            ),
             contents,
             parameters=self._parameters,
         )
