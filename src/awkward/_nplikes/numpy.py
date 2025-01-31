@@ -8,6 +8,7 @@ from awkward._nplikes.array_module import ArrayModuleNumpyLike
 from awkward._nplikes.dispatch import register_nplike
 from awkward._nplikes.numpy_like import NumpyMetadata
 from awkward._nplikes.placeholder import PlaceholderArray
+from awkward._nplikes.virtual import VirtualArray
 from awkward._typing import TYPE_CHECKING, Final, Literal
 
 if TYPE_CHECKING:
@@ -48,7 +49,8 @@ class Numpy(ArrayModuleNumpyLike["NDArray"]):
         return issubclass(type_, numpy.ndarray)
 
     def is_c_contiguous(self, x: NDArray | PlaceholderArray) -> bool:
-        if isinstance(x, PlaceholderArray):
+        # TODO: What should this do for virtual arrays?
+        if isinstance(x, (PlaceholderArray, VirtualArray)):
             return True
         else:
             return x.flags["C_CONTIGUOUS"]  # type: ignore[attr-defined]

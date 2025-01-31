@@ -16,6 +16,7 @@ from awkward._nplikes.numpy_like import IndexType, NumpyMetadata
 from awkward._nplikes.placeholder import PlaceholderArray
 from awkward._nplikes.shape import ShapeItem, unknown_length
 from awkward._nplikes.typetracer import TypeTracer, is_unknown_scalar
+from awkward._nplikes.virtual import VirtualArray
 from awkward._parameters import (
     type_parameters_equal,
 )
@@ -310,10 +311,15 @@ class ListOffsetArray(ListOffsetMeta[Content], Content):
         return self._content._getitem_range(0, 0)
 
     def _is_getitem_at_placeholder(self) -> bool:
-        return (
-            isinstance(self._offsets.data, PlaceholderArray)
-            or self._content._is_getitem_at_placeholder()
+        is_placeholder = isinstance(self._offsets.data, PlaceholderArray)
+        return is_placeholder or self._content._is_getitem_at_placeholder()
+
+    def _is_getitem_at_virtual(self) -> bool:
+        is_virtual = (
+            isinstance(self._offsets.data, VirtualArray)
+            and not self._offsets.data.is_materialized
         )
+        return is_virtual or self._content._is_getitem_at_virtual()
 
     def _getitem_at(self, where: IndexType):
         # Wrap `where` by length

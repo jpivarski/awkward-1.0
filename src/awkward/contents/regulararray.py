@@ -292,6 +292,9 @@ class RegularArray(RegularMeta[Content], Content):
     def _is_getitem_at_placeholder(self) -> bool:
         return False
 
+    def _is_getitem_at_virtual(self) -> bool:
+        return False
+
     def _getitem_at(self, where: IndexType):
         index_nplike = self._backend.index_nplike
         where = index_nplike.regularize_index_for_length(where, self._length)

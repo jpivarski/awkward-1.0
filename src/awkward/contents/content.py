@@ -790,6 +790,9 @@ class Content(Meta):
     def _is_getitem_at_placeholder(self) -> bool:
         raise NotImplementedError
 
+    def _is_getitem_at_virtual(self) -> bool:
+        return NotADirectoryError
+
     def _getitem_at(self, where: IndexType):
         raise NotImplementedError
 

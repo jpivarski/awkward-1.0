@@ -80,6 +80,14 @@ class PlaceholderArray(ArrayLike):
             shape = self._shape
         return type(self)(self._nplike, shape, dtype, self._field_path)
 
+    def __repr__(self):
+        dtype = repr(self._dtype)
+        if self.shape is None:
+            shape = ""
+        else:
+            shape = ", shape=" + repr(self._shape)
+        return f"PlaceholderArray({dtype}{shape})"
+
     def __getitem__(self, index):
         # Typetracers permit slices that don't touch data or shapes
         if isinstance(index, slice):

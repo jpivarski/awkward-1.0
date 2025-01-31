@@ -14,6 +14,7 @@ from awkward._nplikes.numpy_like import IndexType, NumpyMetadata
 from awkward._nplikes.placeholder import PlaceholderArray
 from awkward._nplikes.shape import ShapeItem, unknown_length
 from awkward._nplikes.typetracer import TypeTracer
+from awkward._nplikes.virtual import VirtualArray
 from awkward._parameters import (
     parameters_intersect,
     type_parameters_equal,
@@ -311,9 +312,22 @@ class ListArray(ListMeta[Content], Content):
         return self._content._getitem_range(0, 0)
 
     def _is_getitem_at_placeholder(self) -> bool:
-        return isinstance(self._starts.data, PlaceholderArray) or isinstance(
-            self._stops.data, PlaceholderArray
+        is_placeholder_starts = isinstance(self._starts.data, PlaceholderArray)
+        is_placeholder_stops = isinstance(self._stops.data, PlaceholderArray)
+        is_placeholder = is_placeholder_starts or is_placeholder_stops
+        return is_placeholder
+
+    def _is_getitem_at_virtual(self) -> bool:
+        is_virtual_starts = (
+            isinstance(self._starts.data, VirtualArray)
+            and not self._starts.data.is_materialized
         )
+        is_virtual_stops = (
+            isinstance(self._stops.data, VirtualArray)
+            and not self._stops.data.is_materialized
+        )
+        is_virtual = is_virtual_starts or is_virtual_stops
+        return is_virtual
 
     def _getitem_at(self, where: IndexType):
         if not self._backend.nplike.known_data:
