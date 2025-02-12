@@ -52,7 +52,7 @@ def _impl(array, allow_missing):
     import numpy  # noqa: TID251
 
     with numpy.errstate(invalid="ignore"):
-        layout = ak.to_layout(array, allow_record=False)
+        layout = ak.to_layout(ak.operations.materialize(array), allow_record=False)
 
         backend = NumpyBackend.instance()
         numpy_layout = layout.to_backend(backend)

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
+import awkward as ak
 from awkward._backends.backend import Backend
 from awkward._nplikes.numpy import Numpy
 from awkward._nplikes.numpy_like import NumpyLike, NumpyMetadata
+from awkward._nplikes.virtual import VirtualArray
 from awkward._typing import Callable, TypeAlias, TypeVar, cast
 from awkward._util import UNSET, Sentinel
 
@@ -70,7 +72,15 @@ def common_backend(backends: Collection[Backend]) -> Backend:
 
 
 def backend_of_obj(obj, default: D | Sentinel = UNSET) -> Backend | D:
-    cls = type(obj)
+    if isinstance(obj, VirtualArray):
+        if isinstance(obj.nplike, (ak._nplikes.numpy.Numpy, ak._nplikes.cupy.Cupy)):
+            cls = obj.nplike.ndarray
+        else:
+            raise ValueError(
+                f"Only numpy and cupy nplikes are supported for VirtualArray. Received {type(obj.nplike)}"
+            )
+    else:
+        cls = type(obj)
     try:
         lookup = _type_to_backend_lookup[cls]
         return lookup(obj)

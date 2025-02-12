@@ -138,6 +138,10 @@ class NumpyLike(PublicSingleton, Protocol[ArrayLikeT]):
 
     ############################ array creation
 
+    @property
+    @abstractmethod
+    def ndarray(self) -> ArrayLikeT: ...
+
     @abstractmethod
     def asarray(
         self,

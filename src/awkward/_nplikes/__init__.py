@@ -6,6 +6,7 @@ import awkward._nplikes.cupy
 import awkward._nplikes.jax
 import awkward._nplikes.numpy
 import awkward._nplikes.typetracer
+import awkward._nplikes.virtual
 from awkward._nplikes.dispatch import nplike_of_obj
 from awkward._typing import TYPE_CHECKING
 

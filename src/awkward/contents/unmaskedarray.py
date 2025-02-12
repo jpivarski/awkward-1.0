@@ -239,6 +239,9 @@ class UnmaskedArray(UnmaskedMeta[Content], Content):
     def _is_getitem_at_placeholder(self) -> bool:
         return self._content._is_getitem_at_placeholder()
 
+    def _is_getitem_at_virtual(self) -> bool:
+        return self._content._is_getitem_at_virtual()
+
     def _getitem_at(self, where: IndexType):
         if not self._backend.nplike.known_data:
             self._touch_data(recursive=False)

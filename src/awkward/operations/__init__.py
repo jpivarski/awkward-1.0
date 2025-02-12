@@ -49,6 +49,7 @@ from awkward.operations.ak_from_rdataframe import *
 from awkward.operations.ak_from_regular import *
 from awkward.operations.ak_from_tensorflow import *
 from awkward.operations.ak_from_torch import *
+from awkward.operations.ak_from_virtual import *
 from awkward.operations.ak_full_like import *
 from awkward.operations.ak_imag import *
 from awkward.operations.ak_is_categorical import *
@@ -59,6 +60,7 @@ from awkward.operations.ak_isclose import *
 from awkward.operations.ak_linear_fit import *
 from awkward.operations.ak_local_index import *
 from awkward.operations.ak_mask import *
+from awkward.operations.ak_materialize import *
 from awkward.operations.ak_max import *
 from awkward.operations.ak_mean import *
 from awkward.operations.ak_merge_option_of_records import *
