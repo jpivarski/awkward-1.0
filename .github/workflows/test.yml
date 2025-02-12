@@ -69,6 +69,10 @@ jobs:
             python-architecture: x64
             runs-on: ubuntu-latest
             dependencies-kind: ml
+          - python-version: '3.13t'
+            python-architecture: x64
+            runs-on: ubuntu-latest
+            dependencies-kind: full
 
     runs-on: ${{ matrix.runs-on }}
 
@@ -81,7 +85,7 @@ jobs:
           submodules: true
 
       - name: 'Python ${{ matrix.python-version }}'
-        uses: actions/setup-python@v5
+        uses: Quansight-Labs/setup-python@v5
         with:
           python-version: '${{ matrix.python-version }}'
           architecture: '${{ matrix.python-architecture }}'
