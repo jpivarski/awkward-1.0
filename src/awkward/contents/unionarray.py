@@ -1574,7 +1574,8 @@ class UnionArray(UnionMeta[Content], Content):
         self, backend: Backend, options: RemoveStructureOptions
     ) -> list[Content]:
         out = []
-        for i in range(len(self._contents)):
+        _, unique_index, *_ = self._backend.index_nplike.unique_all(self._tags.data)
+        for i in self._tags.data[self._backend.index_nplike.sort(unique_index)]:
             index = self._index[self._tags.data == i]
             out.extend(
                 self._contents[i]
