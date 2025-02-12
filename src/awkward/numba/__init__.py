@@ -214,10 +214,8 @@ def _register():
 
     @numba.extending.typeof_impl.register(ak.numba.layoutbuilder.BitMasked)
     def typeof_layoutbuilder_BitMasked(val, c):
-        import numba
-
         return ak._connect.numba.layoutbuilder.BitMaskedType(
-            numba.from_dtype(val._mask.dtype),
+            val._mask._dtype,
             val._content,
             val._valid_when,
             val._lsb_order,
@@ -238,26 +236,20 @@ def _register():
 
     @numba.extending.typeof_impl.register(ak.numba.layoutbuilder.IndexedOption)
     def typeof_layoutbuilder_IndexedOption(val, c):
-        import numba
-
         return ak._connect.numba.layoutbuilder.IndexedOptionType(
-            numba.from_dtype(val._index.dtype), val._content, val._parameters
+            numba.from_dtype(val.dtype), val._content, val._parameters
         )
 
     @numba.extending.typeof_impl.register(ak.numba.layoutbuilder.ListOffset)
     def typeof_layoutbuilder_ListOffset(val, c):
-        import numba
-
         return ak._connect.numba.layoutbuilder.ListOffsetType(
-            numba.from_dtype(val._offsets.dtype), val._content, val._parameters
+            val._offsets._dtype, val._content, val._parameters
         )
 
     @numba.extending.typeof_impl.register(ak.numba.layoutbuilder.Numpy)
     def typeof_layoutbuilder_Numpy(val, c):
-        import numba
-
         return ak._connect.numba.layoutbuilder.NumpyType(
-            numba.from_dtype(val._data.dtype), val._parameters
+            val._data._dtype, val._parameters
         )
 
     @numba.extending.typeof_impl.register(ak.numba.layoutbuilder.Record)
@@ -278,11 +270,9 @@ def _register():
 
     @numba.extending.typeof_impl.register(ak.numba.layoutbuilder.Union)
     def typeof_layoutbuilder_Union(val, c):
-        import numba
-
         return ak._connect.numba.layoutbuilder.UnionType(
-            numba.from_dtype(val._tags.dtype),
-            numba.from_dtype(val._index.dtype),
+            val._tags._dtype,
+            val._index._dtype,
             val._contents,
             val._parameters,
         )
